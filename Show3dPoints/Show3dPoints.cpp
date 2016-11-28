@@ -5,6 +5,8 @@
   Copyright (C) 2010	Zhijie Lee
                         email: onezeros.lee@gmail.com 
                         web: http://blog.csdn.net/onezeros
+  modified by zhyh2010 in 2016/11/28
+						web: http://blog.csdn.net/zhyh1435589631
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,37 +23,20 @@
   
 **********************************************************************/
 
-#include <cv.h>
-#include <cxcore.h>
-#include <highgui.h>
-#pragma comment(lib,"cv210d.lib")
-#pragma comment(lib,"cxcore210d.lib")
-#pragma comment(lib,"highgui210d.lib")
-
-#include <gl/glut.h>
-
+#include <opencv.hpp>
+#include "glut.h"
 #include <cstdlib>
 #include <string>
 #include <vector>
 #include <iostream>
+#include <fstream>
+#include <iomanip>
+
 using namespace std;
+using namespace cv;
 
-class Point3d 
-{
-public:
-	float x;
-	float y;
-	float z;
-	Point3d():x(0),y(0),z(0){}
-	Point3d(float* p){x=p[0];y=p[1];z=p[2];}
-};
-///////////////////////////////////////////////////
-//cv
-void reconstruct3Dpoint(float M1[3][4],float M2[3][4],float p1[2],float p2[2],float p3d[3]);
-void getPerpectiveProjectionMat(float M1[3][4],float M2[3][4]);
-void get3dPoints(vector<Point3d>&points,char* f1,char*f2);
+#pragma comment(lib, "glut32.lib")
 
-void drawLocusOnImage();
 ///////////////////////////////////////////////////
 GLsizei winWidth=500,winHeight=500;
 vector<Point3d> pointVec;
@@ -70,235 +55,138 @@ static const float PI=3.1415926;
 static bool isLButtonDown=false;
 static bool isMButtonDown=false;
 static CvPoint oldPoint;
-//gl
-void init(void);
-void display(void);
-void winReshapeFcn(GLint width,GLint height);
-void timerFunc(int id);//change eye position
-void mouseFunc(int button,int action,int xMouse,int yMouse);//change eye position
-void keyFunc(GLubyte key,int xMouse,int yMouse);
-void timerSwitch(int option);
-void writeCharacter(Point3d p,char* str);
-void mouseMotionFunc(int xMouse,int yMouse);
-//utilities
-void updateEyePosition(void);
 
-void main(int argc,char** argv)
-{
-	cout<<"s\tshow locus on images and save them"<<endl
-		<<"+\tzoom in"<<endl
-		<<"-\tzoom out"<<endl
-		<<"ESC\tquit"<<endl;
+vector<Mat> ComputeDis(vector<Point3d> & points, Mat matl, Mat matr, vector<Point2d> & left, vector<Point2d> & right);
 
-	char* datafile[2];
-	if (argc==3){
-		datafile[0]=argv[1];
-		datafile[1]=argv[2];
-	}else{
-		datafile[0]="../data/videos/video_cv_glove_0.avi.yml";
-		datafile[1]="../data/videos/video_cv_glove_1.avi.yml";
-	}
 
-	glutInit(&argc,argv);
-	glutInitDisplayMode(GLUT_SINGLE|GLUT_RGB);
-	glutInitWindowPosition(100,100);
-	glutInitWindowSize(winWidth,winHeight);
-	glutCreateWindow("Locus");
-
-	//points
-	get3dPoints(pointVec,datafile[0],datafile[1]);
-
-	init();
-	//menu
-	glutCreateMenu(timerFunc);
-	glutAddMenuEntry("Turn On Timer",1);
-	glutAddMenuEntry("Turn Off Timer",2);
-	glutAttachMenu(GLUT_RIGHT_BUTTON);
-
-	glutDisplayFunc(display);
-	glutReshapeFunc(winReshapeFcn);
-	//glutIdleFunc(timerFunc);
-	glutKeyboardFunc(keyFunc);
-	glutMouseFunc(mouseFunc);
-	glutMotionFunc(mouseMotionFunc);
-	glutTimerFunc(timerInterval,&timerFunc,0);
-
-	glutMainLoop();
-
-}
 ///////////////////////////////////////////////////
 //cv
 
-void reconstruct3Dpoint(float M1[3][4],float M2[3][4],float p1[2],float p2[2],float p3d[3])
-{
-	float coeff1[4][3];
-	float coeff2[4];
-
-	coeff1[0][0]=p1[0]*M1[2][0]-M1[0][0];
-	coeff1[0][1]=p1[0]*M1[2][1]-M1[0][1];
-	coeff1[0][2]=p1[0]*M1[2][2]-M1[0][2];
-	coeff1[1][0]=p1[1]*M1[2][0]-M1[1][0];
-	coeff1[1][1]=p1[1]*M1[2][1]-M1[1][1];
-	coeff1[1][2]=p1[1]*M1[2][2]-M1[1][2];
-	coeff1[2][0]=p2[0]*M2[2][0]-M2[0][0];
-	coeff1[2][1]=p2[0]*M2[2][1]-M2[0][1];
-	coeff1[2][2]=p2[0]*M2[2][2]-M2[0][2];
-	coeff1[3][0]=p2[1]*M2[2][0]-M2[1][0];
-	coeff1[3][1]=p2[1]*M2[2][1]-M2[1][1];
-	coeff1[3][2]=p2[1]*M2[2][2]-M2[1][2];
-
-	coeff2[0]=M1[0][3]-p1[0]*M1[2][3];
-	coeff2[1]=M1[1][3]-p1[1]*M1[2][3];
-	coeff2[2]=M2[0][3]-p2[0]*M2[2][3];
-	coeff2[3]=M2[1][3]-p2[1]*M2[2][3];
-
-	CvMat mat1=cvMat(4,3,CV_32FC1,coeff1);
-	CvMat mat2=cvMat(4,1,CV_32FC1,coeff2);
-	CvMat matResult=cvMat(3,1,CV_32FC1,p3d);
-	cvSolve(&mat1,&mat2,&matResult,CV_SVD);
-}
-void getPerpectiveProjectionMat(float M1[3][4],float M2[3][4])
-{
-	char* names[2]={"../data/images/coorfile0.ifl-parameters.yml","../data/images/coorfile1.ifl-parameters.yml"};
-	float (*ret[2])[4]={M1,M2};
-
-	for (int i=0;i<2;i++){
-		CvFileStorage* fs=cvOpenFileStorage(names[i],0,CV_STORAGE_READ);
-		if(!fs){
-			cout<<"failed to load file storage"<<endl;
-			exit(0);
-		}
-
-		CvMat* r,* t,*intri;
-		CvFileNode* node=cvGetFileNodeByName(fs,0,"rotate0");
-		r=(CvMat*)cvRead(fs,node);
-		node=cvGetFileNodeByName(fs,0,"translate0");
-		t=(CvMat*)cvRead(fs,node);
-		node=cvGetFileNodeByName(fs,0,"intrinsic");
-		intri=(CvMat*)cvRead(fs,node);
-
-		CvMat * rr=cvCreateMat(3,3, CV_32FC1);
-
-		cvRodrigues2(r,rr);
-
-		for (int h=0;h<3;h++){
-			ret[i][h][3]=t->data.fl[h];
-			for (int w=0;w<3;w++){
-				ret[i][h][w]=*(rr->data.fl+h*3+w);
-			}
-		}
-		CvMat m=cvMat(3,4,CV_32FC1,ret[i]);
-		cvMatMul(intri,&m,&m);
-
-		cvReleaseMat(&r);
-		cvReleaseMat(&rr);
-		cvReleaseMat(&t);
-
-		cvReleaseFileStorage(&fs);
-	}
-}
-void get3dPoints(vector<Point3d>&points,char* yml1,char* yml2)
-{
-	float M1[3][4];
-	float M2[3][4];
-	getPerpectiveProjectionMat(M1,M2);
-	//read two 2d points sequences
-	CvMat* mat[2];
-	char* fsname[2]={yml1,yml2};
-
-	CvFileStorage* fs[2];
-	for (int i=0;i<2;i++){
-		fs[i]=cvOpenFileStorage(fsname[i],NULL,CV_STORAGE_READ);
-		CvFileNode* node=cvGetFileNodeByName(fs[i],0,"fingertip");
-		mat[i]=(CvMat*)cvRead(fs[i],node);
-	}
-
-	points.clear();
-	//reconstruct
-	for (int i=0;i<mat[0]->rows;i++){
-		float p[3]={0};
-		float p1[2]={mat[0]->data.i[i<<1],mat[0]->data.i[(i<<1)+1]};
-		float p2[2]={mat[1]->data.i[i<<1],mat[1]->data.i[(i<<1)+1]};
-		if (p1[0]>0&&p1[1]>0&&p2[0]>0&&p2[1]>0){
-			reconstruct3Dpoint(M1,M2,p1,p2,p);
-			Point3d p3d(p);
-			points.push_back(p3d);
-		}
-	}
-}
-
-void drawLocusOnImage()
-{
-	char* names[2]={"../data/images/coorfile0.ifl-parameters.yml","../data/images/coorfile1.ifl-parameters.yml"};
-	char* imgName[2]={"../data/images/image0_000.jpg","../data/images/image1_000.jpg"};
-
-	CvMat* objectPoints;
-	//3d data
-	objectPoints=cvCreateMat(pointVec.size(),3,CV_32FC1);
-	vector<Point3d>::iterator ite;
-	float* p=objectPoints->data.fl;
-	for (ite=pointVec.begin();ite!=pointVec.end();ite++){
-		*p++=ite->x;
-		*p++=ite->y;
-		*p++=ite->z;
-	}
-
-	for (int i=0;i<2;i++){
-		CvMat* imagePoints;
-		CvMat* r,* t,*intri,*distortion;
-		CvFileStorage* fs=cvOpenFileStorage(names[i],0,CV_STORAGE_READ);
-		
-		CvFileNode* node=cvGetFileNodeByName(fs,0,"rotate0");
-		r=(CvMat*)cvRead(fs,node);
-		node=cvGetFileNodeByName(fs,0,"translate0");
-		t=(CvMat*)cvRead(fs,node);
-		node=cvGetFileNodeByName(fs,0,"intrinsic");
-		intri=(CvMat*)cvRead(fs,node);
-		node=cvGetFileNodeByName(fs,0,"distortion");
-		distortion=(CvMat*)cvRead(fs,node);
-		cvReleaseFileStorage(&fs);
-
-		imagePoints=cvCreateMat(pointVec.size(),2,CV_32FC1);	
+void reconstruct3Dpoint(Mat matl, Mat matr, Point2d left, Point2d right, Point3d & point){
+	Mat A(4, 4, CV_64F);
+	Mat pl1 = matl.row(0);
+	Mat pl2 = matl.row(1);
+	Mat pl3 = matl.row(2);
+	Mat pr1 = matr.row(0);
+	Mat pr2 = matr.row(1);
+	Mat pr3 = matr.row(2);
+	double xl = left.x, yl = left.y;
+	double xr = right.x, yr = right.y;
+	A.row(0) = xl * pl3 - pl1;
+	A.row(1) = yl * pl3 - pl2;
+	A.row(2) = xr * pr3 - pr1;
+	A.row(3) = yr * pr3 - pr2;
 	
-		//reproject coordinates from 3d to window
-		cvProjectPoints2(objectPoints,r,t,intri,distortion,imagePoints);
-		
-		//show and save images
-		IplImage* img;
-		char buf[500]={0};
-		img=cvLoadImage(imgName[i]);
-		if (!img){
-			cout<<"failed to load image"<<endl;
-			exit(0);
-		}
-		float* pdata=imagePoints->data.fl;
-		for (int pc=1;pc<imagePoints->rows;pc++){
-			int x=int(*pdata++);
-			int y=int(*pdata++);
-			CvPoint p1=cvPoint(x,y);
-			x=int(*pdata++);
-			y=int(*pdata++);
-			CvPoint p2=cvPoint(x,y);
-			pdata-=2;
-			//
-			cvLine(img,p1,p2,CV_RGB(255,0,0),2);
-		}
-		sprintf(buf,"%s.locus.jpg",imgName[i]);
-		cvShowImage(buf,img);
-		cvSaveImage(buf,img);
-		
-		//release memory
-		cvReleaseMat(&imagePoints);
-		cvReleaseMat(&r);
-		cvReleaseMat(&t);
-		cvReleaseMat(&distortion);
-		cvReleaseImage(&img);		
-	}
-	cvReleaseMat(&objectPoints);	
+	Mat res;
+	SVD::solveZ(A, res);
+	point.x = res.at<double>(0, 0) / res.at<double>(3, 0);
+	point.y = res.at<double>(1, 0) / res.at<double>(3, 0);
+	point.z = res.at<double>(2, 0) / res.at<double>(3, 0);
 }
-///////////////////////////////////////////////////
+
+void getPerpectiveProjectionMat(vector<Mat> & mats){
+	mats = vector<Mat>(2);
+	vector<string> names{ "../data/images/coorfile0.ifl-parameters.yml", "../data/images/coorfile1.ifl-parameters.yml" };
+	for (int i = 0; i < 2; i++){
+		FileStorage fs(names[i], CV_STORAGE_READ);
+		if (!fs.isOpened()){
+			throw exception("无法打开相应的棋盘格点文件");
+		}
+
+		Mat r, t, intri, rr;
+		fs["rotate0"] >> r;
+		fs["translate0"] >> t;
+		fs["intrinsic"] >> intri;
+		Rodrigues(r, rr);
+
+		Mat m;
+		hconcat(rr, t, m);
+		m = intri * m;
+		mats[i] = m;
+
+		fs.release();
+	}
+}
+
+bool saveToText(vector<Point3d> & data, string fileName){
+	ofstream output(fileName);
+	for (auto item : data){
+		output << setw(20) << fixed << setprecision(15) << item.x << "\t" <<
+			setw(20) << fixed << setprecision(15) << item.y << "\t" <<
+			setw(20) << fixed << setprecision(15) << item.z << endl;
+	}
+	return true;
+}
+
+void get3dPoints(vector<Point3d> & points, string & yml1, string & yml2){
+	vector<Mat> mats;
+	getPerpectiveProjectionMat(mats);
+	//read two 2d points sequences
+	vector<vector<Point2d>> fingers(2);
+	vector<string> fsname{ yml1, yml2 };
+	for (int i = 0; i < 2; i++){
+		FileStorage fs(fsname[i], CV_STORAGE_READ);
+		fs["fingertip"] >> fingers[i];
+		fs.release();
+	}
+	points.clear();
+
+	//reconstruct
+	vector<Point2d> lefts, rights;
+	for (int i = 0; i < fingers[0].size(); i++){
+		Point2d left = fingers[0][i];
+		Point2d right = fingers[1][i];
+		Point3d point;
+		if (left.x > 0 && left.y > 0 && right.x > 0 && right.y > 0){
+			reconstruct3Dpoint(mats[0], mats[1], left, right, point);
+			points.push_back(point);
+			lefts.push_back(left);
+			rights.push_back(right);
+		}
+	}
+
+	auto res = ComputeDis(points, mats[0], mats[1], lefts, rights);
+	saveToText(points, "3dpoints.txt");
+}
+
+void drawLocusOnImage(){
+	vector<string> names{ "../data/images/coorfile0.ifl-parameters.yml", "../data/images/coorfile1.ifl-parameters.yml" };
+	vector<string> imgName{ "../data/images/image0_3.jpg", "../data/images/image1_3.jpg" };
+	for (int i = 0; i < 2; i++){
+		Mat r, t, intri, distortion;
+		FileStorage fs(names[i], CV_STORAGE_READ);
+		fs["rotate0"] >> r;
+		fs["translate0"] >> t;
+		fs["intrinsic"] >> intri;
+		fs["distortion"] >> distortion;
+
+		Mat imagePoints;
+		//reproject coordinates from 3d to window
+		projectPoints(pointVec, r, t, intri, distortion, imagePoints);
+
+		//show and save images
+		Mat img = imread(imgName[i]);
+		if (!img.empty()){
+			cerr << "failed to load image" << endl;
+			exit(-1);
+		}
+		for (int j = 1; j < imagePoints.rows; j++){
+			Point2d point1(imagePoints.at<double>(i - 1, 0), imagePoints.at<double>(i - 1, 1));
+			Point2d point2(imagePoints.at<double>(i, 0), imagePoints.at<double>(i, 1));
+			line(img, point1, point2, CV_RGB(255, 0, 0), 2);
+		}
+
+		string name = imgName[i] + ".locus.jpg";
+		imshow(name, img);
+		imwrite(name, img);
+	}
+}
+
+/////////////////////////////////////////////////
 //gl
 
+void updateEyePosition();
+void writeCharacter(Point3d p, char* str);
 void init(void)
 {
 	glClearColor(1.0,1.0,1.0,1.0);
@@ -317,6 +205,7 @@ void display(void)
 	updateEyePosition();
 	
 	gluLookAt(eyePos.x,eyePos.y,eyePos.z,0.0,0.0,0.0,0.0,1.0,0.0);
+	//gluLookAt(0, 0, -50, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 	
 
 	//glPushMatrix();
@@ -378,7 +267,8 @@ void winReshapeFcn(GLint width,GLint height)
 	glViewport(0,0,width,height);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(60,(GLfloat)width/(GLfloat)height,0.1,2000.0);
+	//gluPerspective(60,(GLfloat)width/(GLfloat)height,0.1,2000.0);
+	gluPerspective(60, (GLfloat)width / (GLfloat)height, 0.1, 10000.0);
 	glMatrixMode(GL_MODELVIEW);
 }
 
@@ -494,4 +384,69 @@ void updateEyePosition()
 	float t=radius*cos(radVertical);
 	eyePos.x=t*sin(radHorizontal);
 	eyePos.z=t*cos(radHorizontal);
+}
+
+vector<Mat> ComputeDis(vector<Point3d> & points, Mat matl, Mat matr, vector<Point2d> & left, vector<Point2d> & right){
+	Mat diffl(points.size(), 2, CV_64F), diffr(points.size(), 2, CV_64F);
+	for (int i = 0; i < points.size(); i++){
+		Mat w3d(4, 1, CV_64F);
+		w3d.at<double>(0, 0) = points[i].x;
+		w3d.at<double>(1, 0) = points[i].y;
+		w3d.at<double>(2, 0) = points[i].z;
+		w3d.at<double>(3, 0) = 1.0;
+		Mat resl = matl * w3d;
+		diffl.at<double>(i, 0) = resl.at<double>(0, 0) / resl.at<double>(2, 0) - left[i].x;
+		diffl.at<double>(i, 1) = resl.at<double>(1, 0) / resl.at<double>(2, 0) - left[i].y;
+
+		Mat resr = matr * w3d;
+		diffr.at<double>(i, 0) = resr.at<double>(0, 0) / resr.at<double>(2, 0) - right[i].x;
+		diffr.at<double>(i, 1) = resr.at<double>(1, 0) / resr.at<double>(2, 0) - right[i].y;
+	}
+	return vector<Mat>{diffl, diffr};
+}
+
+void main(int argc, char** argv){
+	cout << "s\tshow locus on images and save them" << endl
+		<< "+\tzoom in" << endl
+		<< "-\tzoom out" << endl
+		<< "ESC\tquit" << endl;
+
+	vector<string> datafile(2);
+	if (argc == 3){
+		datafile[0] = argv[1];
+		datafile[1] = argv[2];
+	}
+	else{
+		// 		datafile[0]="../data/videos/video_cv_glove_0.avi.yml";
+		// 		datafile[1]="../data/videos/video_cv_glove_1.avi.yml";
+		datafile[0] = "../data/videos/video0.avi.yml";
+		datafile[1] = "../data/videos/video1.avi.yml";
+	}
+
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
+	glutInitWindowPosition(100, 100);
+	glutInitWindowSize(winWidth, winHeight);
+	glutCreateWindow("Locus");
+
+	//points
+	get3dPoints(pointVec, datafile[0], datafile[1]);
+
+	init();
+	//menu
+	glutCreateMenu(timerFunc);
+	glutAddMenuEntry("Turn On Timer", 1);
+	glutAddMenuEntry("Turn Off Timer", 2);
+	glutAttachMenu(GLUT_RIGHT_BUTTON);
+
+	glutDisplayFunc(display);
+	glutReshapeFunc(winReshapeFcn);
+	//glutIdleFunc(timerFunc);
+	glutKeyboardFunc(keyFunc);
+	glutMouseFunc(mouseFunc);
+	glutMotionFunc(mouseMotionFunc);
+	glutTimerFunc(timerInterval, &timerFunc, 0);
+
+	glutMainLoop();
+
 }

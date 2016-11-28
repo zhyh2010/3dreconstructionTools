@@ -5,6 +5,8 @@
   Copyright (C) 2010	Zhijie Lee
                         email: onezeros.lee@gmail.com 
                         web: http://blog.csdn.net/onezeros
+  modified by zhyh2010 in 2016/11/28
+						web: http://blog.csdn.net/zhyh1435589631
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,119 +23,141 @@
   
 **********************************************************************/
 
-#include <cv.h>
-#include <cxcore.h>
-#include <highgui.h>
-#pragma comment(lib,"cv210d.lib")
-#pragma comment(lib,"cxcore210d.lib")
-#pragma comment(lib,"highgui210d.lib")
-
+#include <opencv.hpp>
 #include <vector>
 #include <string>
 #include <iostream>
 #include <fstream>
-using namespace std;
+#include <algorithm>
 
-int main(int argc,char** argv)
-{
-	if (argc!=4){
-		cout<<"usage: CalibFromPoints f.ifl l w h"
-			<<"\n\tf.ifl\tlist of files which store filename of corner coordinates"
-			<<"\n\t\tlike this"
-			<<"\n\t\t\timg0.jpg"
-			<<"\n\t\t\timg1.jpg"
-			<<"\n\t\t\timg2.jpg"
-			<<"\n\tl\tlength of chessboard lattice"
-			<<"\n\tw\twidth of the images"
-			<<"\n\th\theight of the images"
-			<<endl;
-		return 0;
+using namespace std;
+using namespace cv;
+
+void showTips(int argc){
+	if (argc != 7){
+		cout << "usage: CalibFromPoints f.ifl l w h nw nh"
+			<< "\n\tf.ifl\tlist of files which store filename of corner coordinates"
+			<< "\n\t\tlike this"
+			<< "\n\t\t\timg0.jpg"
+			<< "\n\t\t\timg1.jpg"
+			<< "\n\t\t\timg2.jpg"
+			<< "\n\tl\tlength of chessboard lattice"
+			<< "\n\tw\twidth of the images"
+			<< "\n\th\theight of the images"
+			<< "\n\tnw\tnumber of chessboard corners in width"
+			<< "\n\tnh\tnumber of chessboard corners in height"
+			<< endl;
+		exit(-1);
 	}
-	//read files
+}
+
+vector<string> readFiles(string filename){
 	vector<string> filenameVec;
-	fstream fin(argv[1],ios::in);
-	if(!fin.is_open()){
-		cout<<"can not open file:"<<argv<<endl;
-		return 0;
+	fstream fin(filename, ios::in);
+	if (!fin.is_open()){
+		cout << "can not open file:" << filename << endl;
+		exit(-1);
 	}
-	while(!fin.eof()){
-		char nameBuf[MAX_PATH];
-		fin>>nameBuf;
+	while (!fin.eof()){
+		string nameBuf;
+		fin >> nameBuf;
+		if (nameBuf == "")
+			continue;
 		filenameVec.push_back(nameBuf);
 	}
 	fin.close();
+	return filenameVec;
+}
 
-	int cornerCount;
+struct CornerInfo{
 	int cornerHeightNum;
 	int cornerWidthNum;
-	//get amount of corners
-	CvFileStorage* fs=cvOpenFileStorage(filenameVec[0].c_str(),0,CV_STORAGE_READ);
-	CvFileNode* node=cvGetFileNodeByName(fs,0,"corners");
-	CvMat* corner=(CvMat*)cvRead(fs,node);
-	cornerHeightNum=corner->height;
-	cornerWidthNum=corner->width;
-	cornerCount=corner->cols*corner->rows;
-	cvReleaseFileStorage(&fs);
+	int cornerCount;
+};
 
-	//calibration
-	CvSize imgSize=cvSize(atoi(argv[3]),atoi(argv[4]));
-	int imgCount=filenameVec.size();
-	double latticeLen=atof(argv[2]);
-	CvMat* countMat=cvCreateMat(imgCount,1,CV_32SC1);
-	CvMat* points2d=cvCreateMat(imgCount*cornerCount,2,CV_32FC1);
-	CvMat* points3d=cvCreateMat(imgCount*cornerCount,3,CV_32FC1);
-	CvMat* intrinsicMat=cvCreateMat(3,3,CV_32FC1);
-	CvMat* distortionMat=cvCreateMat(1,4,CV_32FC1);
-	CvMat* rotateMat=cvCreateMat(imgCount,3,CV_32FC1);
-	CvMat* transMat=cvCreateMat(imgCount,3,CV_32FC1);
-	//set counteMat
-	for (int i=0;i<imgCount;i++){
-		countMat->data.i[i]=cornerCount;
+CornerInfo getCornersNum(int nw, int nh){
+	CornerInfo info;
+	info.cornerHeightNum = nh;
+	info.cornerWidthNum = nw;
+	info.cornerCount = info.cornerHeightNum * info.cornerWidthNum;
+	return info;
+}
+
+void setCountMat(int imgCount, Mat & countMat, int cornerCount){
+	countMat = Mat(imgCount, 1, CV_32SC1);
+	for (int i = 0; i < imgCount; i++){
+		countMat.at<int>(i, 0) = cornerCount;
 	}
-	//set points2d from files
-	for (unsigned int i=0;i<filenameVec.size();i++){
-		CvFileStorage* fs=cvOpenFileStorage(filenameVec[0].c_str(),0,CV_STORAGE_READ);
-		CvFileNode* node=cvGetFileNodeByName(fs,0,"corners");
-		CvMat* corner=(CvMat*)cvRead(fs,node);
-		memcpy(points2d->data.fl+i*cornerCount*2,corner->data.fl,sizeof(float)*cornerCount*2);
-		cvReleaseFileStorage(&fs);
+}
+
+void setPoint2dFromFile(vector<string> filenameVec, vector<vector<Point2f>> & points2d){
+	for (unsigned int i = 0; i < filenameVec.size(); i++){
+		FileStorage fs(filenameVec[i], CV_STORAGE_READ);
+		Mat corner;
+		fs["corners"] >> corner;
+		vector<Point2f> tmp;
+		for (int i = 0; i < corner.rows; i++){
+			tmp.emplace_back(corner.at<float>(i, 0), corner.at<float>(i, 1));
+		}	
+		points2d.push_back(tmp);
+		fs.release();
 	}
-	//set points3d
-	int l=cornerCount*3;
-	for (int m=0;m<imgCount;m++){
-		CvPoint3D32f* pt=(CvPoint3D32f*)points3d->data.fl+m*cornerCount;
-		for (int i=0;i<cornerHeightNum;i++){
-			for (int j=0;j<cornerWidthNum;j++){
-				*pt++=cvPoint3D32f((5-i)*latticeLen,(5-j)*latticeLen,0);
+}
+
+void setPoint3d(int imgCount, vector<vector<Point3f>> & points3d, CornerInfo info, double latticeLen){
+	for (int m = 0; m < imgCount; m++){
+		vector<Point3f> tmp;
+		for (int i = 0; i < info.cornerHeightNum; i++){
+			for (int j = 0; j < info.cornerWidthNum; j++){
+				tmp.emplace_back(j * latticeLen, i * latticeLen, 0);
 			}
 		}
+		points3d.push_back(tmp);
 	}
-	//calibration
-	cvCalibrateCamera2(points3d,points2d,countMat,imgSize,intrinsicMat,distortionMat,rotateMat,transMat,0);
-	//save camera parameters
-	string fsname=argv[1];
-	fsname+="-parameters.yml";
-	CvFileStorage* fstorage = cvOpenFileStorage(fsname.c_str(), NULL, CV_STORAGE_WRITE);
-	char buf[20];
-	cvWrite(fstorage, "intrinsic",intrinsicMat);
-	cvWrite(fstorage, "distortion",distortionMat);
-	for (int i=0;i<imgCount;i++){
-		CvMat r=cvMat(1,3,CV_32FC1,rotateMat->data.fl+i*3);	
-		CvMat t=cvMat(1,3,CV_32FC1,transMat->data.fl+i*3);
-		sprintf(buf,"rotate%d",i);
-		cvWrite(fstorage, buf,&r);
-		sprintf(buf,"translate%d",i);
-		cvWrite(fstorage, buf,&t);
-	}	
-	cvReleaseFileStorage(&fstorage);
+}
 
-	cvReleaseMat(&countMat);
-	cvReleaseMat(&points2d);
-	cvReleaseMat(&points3d);
-	cvReleaseMat(&intrinsicMat);
-	cvReleaseMat(&distortionMat);
-	cvReleaseMat(&rotateMat);
-	cvReleaseMat(&transMat);
+void Calibration(vector<vector<Point3f>> & points3d, vector<vector<Point2f>> & points2d, Size imgSize, Mat & intriniscMat, Mat & distortionMat, vector<Mat> & rotateMat, vector<Mat> & transMat){
+	calibrateCamera(points3d, points2d, imgSize, intriniscMat, distortionMat, rotateMat, transMat, 0);
+}
+
+void saveMats(string fsname, int imgCount, Mat intriniscMat, Mat distortionMat, vector<Mat> & rotateMat, vector<Mat> & transMat){
+	FileStorage fs(fsname, CV_STORAGE_WRITE);
+	fs << "intrinsic" << intriniscMat;
+	fs << "distortion" << distortionMat;
+	for (int i = 0; i < imgCount; i++){
+		fs << string("rotate") + to_string(i) << rotateMat[i];
+		fs << string("translate") + to_string(i) << transMat[i];
+	}
+	fs.release();
+}
+
+int main(int argc,char** argv){
+	showTips(argc);
+	//read files
+	auto filenameVec = readFiles(argv[1]);
+	auto info = getCornersNum(atoi(argv[5]), atoi(argv[6]));
+
+	//set counteMat
+	Mat countMat;
+	setCountMat(filenameVec.size(), countMat, info.cornerCount);
+	
+	//set points2d from files
+	vector<vector<Point2f>> points2d;
+	setPoint2dFromFile(filenameVec, points2d);
+
+	//set points3d
+	vector<vector<Point3f>> points3d;
+	setPoint3d(filenameVec.size(), points3d, info, atof(argv[2]));
+	
+	//calibration
+	Size imgSize(atoi(argv[3]), atoi(argv[4]));
+	Mat intriniscMat, distortionMat;
+	vector<Mat> rotateMat, transMat;
+	Calibration(points3d, points2d, imgSize, intriniscMat, distortionMat, rotateMat, transMat);
+
+	//save camera parameters
+	string fsname = string(argv[1]) + "-parameters.yml";
+	saveMats(fsname, filenameVec.size(), intriniscMat, distortionMat, rotateMat, transMat);
 
 	cout<<"Done.parameters saved in"<<fsname<<endl;
 

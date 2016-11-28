@@ -5,6 +5,8 @@
   Copyright (C) 2010	Zhijie Lee
                         email: onezeros.lee@gmail.com 
                         web: http://blog.csdn.net/onezeros
+  modified by zhyh2010 in 2016/11/28
+						web: http://blog.csdn.net/zhyh1435589631
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -21,71 +23,72 @@
   
 **********************************************************************/
 
-#include <cstdlib>
 #include <iostream>
+#include <opencv.hpp>
+
 using namespace std;
+using namespace cv;
 
-#include <cv.h>
-#include <cxcore.h>
-#include <highgui.h>
-#pragma comment(lib,"cv210d.lib")
-#pragma comment(lib,"cxcore210d.lib")
-#pragma comment(lib,"highgui210d.lib")
-
-int main(int argc,char** argv)
-{
-
-	if (argc<4||argc>5){
-		cout<<"usage: chessboardGenerator h w l [f]"
-			<<"\n\th\tlattice number in height"
-			<<"\n\tw\tlattice number in width"
-			<<"\n\tl\tlength of lattice in pixel"
-			<<"\n\tf\tfilename with proper extension for saving the generated image"<<endl;
-			
+void ShowHelp(int argc){
+	if (argc<4 || argc>5){
+		cout << "usage: chessboardGenerator h w l [f]"
+			<< "\n\th\tlattice number in height"
+			<< "\n\tw\tlattice number in width"
+			<< "\n\tl\tlength of lattice in pixel"
+			<< "\n\tf\tfilename with proper extension for saving the generated image" << endl;
 		exit(0);
 	}
+}
 
-	int h=atoi(argv[1]);
-	int w=atoi(argv[2]);
-	int len=atoi(argv[3]);
-
-	int height=h*len;
-	int width=w*len;
-	IplImage* img=cvCreateImage(cvSize(width,height),8,1);
-	for (int i=0;i<h;i++){
-		for (int j=0;j<w;j++){
-			for (int lah=0;lah<len;lah++){
-				for (int law=0;law<len;law++){
-					unsigned char*p=(unsigned char*)img->imageData+(i*len+lah)*img->widthStep+j*len+law;
-					if ((i+j)%2){
-						*p=255;
-					}else{
-						*p=0;
-					}
-				}
-			}
+void drawBlocks(Mat src, bool isLight, int offsetx, int offsety, int blockLen){
+	for (int i = 0; i < blockLen; i++){
+		for (int j = 0; j < blockLen; j++){
+			src.at<double>(offsetx + i, offsety + j) = (isLight ? 255 : 0);
 		}
 	}
+}
 
+void drawChessBox(Mat & src, int h, int w, int len){
+	int height = h*len;
+	int width = w*len;
+	src = Mat(width, height, CV_64FC1);
+	for (int i = 0; i < h; i++){
+		for (int j = 0; j < w; j++){
+			drawBlocks(src, (i + j) % 2, i * len, j * len, len);
+		}
+	}
+}
+
+string getSavedFileName(int argc, char * argv[]){
 	string str;
-	if (argc==5){
-		str=argv[4];		
-	}else{
-		str="chessboard";
-		for (int i=1;i<4;i++){
-			str+="-";
-			str+=argv[i];
+	if (argc == 5){
+		str = argv[4];
+	}
+	else{
+		str = "chessboard";
+		for (int i = 1; i < 4; i++){
+			str += "-";
+			str += argv[i];
 		}
-		str+=".jpg";
+		str += ".jpg";
 	}
-	
-	if(cvSaveImage(str.c_str(),img)){
-		cout<<"succeed to save image:"<<str<<endl;
-	}else{
-		cout<<"failed to save image:"<<str<<endl;
+	return str;
+}
+
+void saveFile(string filename, Mat src){
+	if (imwrite(filename, src)){
+		cout << "succeed to save image:" << filename << endl;
 	}
+	else{
+		cout << "failed to save image:" << filename << endl;
+	}
+}
 
-	cvReleaseImage(&img);
-
+int main(int argc, char** argv){
+	Mat src;
+	ShowHelp(argc);	
+	drawChessBox(src, atoi(argv[1]), atoi(argv[2]), atoi(argv[3]));
+	string fileName = getSavedFileName(argc, argv);	
+	saveFile(fileName, src);	
 	return 0;
 }

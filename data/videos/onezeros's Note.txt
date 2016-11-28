@@ -1,4 +1,0 @@
-Please put the sample videos here.
-
-When dealing with naked-hand video,the threshold is better to be set around 116,
-while int hand-in-glove video,the threshold is better to be set around 105.

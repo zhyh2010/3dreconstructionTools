@@ -5,6 +5,8 @@
   Copyright (C) 2010	Zhijie Lee
                         email: onezeros.lee@gmail.com 
                         web: http://blog.csdn.net/onezeros
+  modified by zhyh2010 in 2016/11/28
+						web: http://blog.csdn.net/zhyh1435589631
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -23,72 +25,92 @@
 
 #include <iostream>
 #include <fstream>
+#include <opencv.hpp>
+#include <windows.h>
+
+using namespace cv;
 using namespace std;
 
-#include <cv.h>
-#include <cxcore.h>
-#include <highgui.h>
-#pragma comment(lib,"cv210d.lib")
-#pragma comment(lib,"cxcore210d.lib")
-#pragma comment(lib,"highgui210d.lib")
-
-int main(int argc,char** argv)
-{
-	CvCapture* pCap[2];
-	IplImage* pImg[2];
-
-	if( !(pCap[0] = cvCaptureFromCAM(0))){
-		fprintf(stderr, "Can not open camera 1.\n");
-		return -1;
+VideoCapture openCapture(int deviceId){
+	VideoCapture cap(deviceId);
+	if (!cap.isOpened()){
+		cerr << "Can not open camera" << deviceId << endl;
+		exit(0);
 	}
-	if (!(pCap[1] = cvCaptureFromCAM(1))){
-		fprintf(stderr,"Can not open camera 2.\n");
-		return -2;
+	return cap;
+}
+
+Mat getFrameData(VideoCapture & cap){
+	Mat src;
+	if (!cap.read(src)){
+		cerr << "can not query frame from camera" << endl;
+		exit(-1);
 	}
+	return src;
+}
 
-	pImg[0]=cvQueryFrame(pCap[0]);
-	pImg[1]=cvQueryFrame(pCap[1]);
-	if (pImg[0]==NULL){
-		fprintf(stderr,"can not query frame from camera 1.\n");
-		return -3;
+vector<VideoCapture> openCameras(const vector<int> & deviceIds){
+	vector<VideoCapture> videocaps;
+	for (auto item : deviceIds){
+		videocaps.emplace_back(item);
 	}
-	if (pImg[1]==NULL){
-		fprintf(stderr,"can not query frame from camera 2.\n");
-		return -4;
+	return videocaps;
+}
+
+vector<Mat> getPairedFrameData(vector<VideoCapture> & caps){
+	vector<Mat> mats;
+	for (auto item : caps){
+		mats.emplace_back(getFrameData(item));
 	}
+	return mats;
+}
 
-	cvNamedWindow("camera1");
-	cvNamedWindow("camera2");
+void saveFile(string filename, Mat src){
+	if (imwrite(filename, src)){
+		cout << "succeed to save image:" << filename << endl;
+	}
+	else{
+		cout << "failed to save image:" << filename << endl;
+	}
+}
 
-	int count=0;
-	char nameBuf[50];
-	cout<<"press Enter to save a pair of images"<<endl;
+//#define USEONE
 
-	while ((pImg[0]=cvQueryFrame(pCap[0]))&&(pImg[1]=cvQueryFrame(pCap[1]))){
-		cvShowImage("camera1",pImg[0]);
-		cvShowImage("camera2",pImg[1]);
-		int key=cvWaitKey(3);
-		if (key==27){// esc to quit
+int main(int argc, char** argv){
+	vector<int> deviceIds{ 0, 1};
+	auto caps = openCameras(deviceIds);	
+
+	namedWindow("camera1", CV_WINDOW_NORMAL);
+
+#ifndef USEONE
+	namedWindow("camera2", CV_WINDOW_NORMAL);
+#endif
+
+	int count = 0;
+	cout << "press Enter to save a pair of images" << endl;
+	Sleep(1000);
+
+	while (true){
+		auto Imgs = getPairedFrameData(caps);
+		imshow("camera1", Imgs[0]);
+#ifndef USEONE
+		imshow("camera2", Imgs[1]);
+#endif
+		int key = waitKey(3);
+		if (key == 27){
 			break;
-		}else if (key==13){//save image
-			sprintf_s(nameBuf,50,"../data/images/image0_%03d.jpg",count);
-			if (!cvSaveImage(nameBuf,pImg[0])){
-				cout<<"can not save image :"<<nameBuf<<endl;
-			}else{
-				cout<<"saved :"<<nameBuf<<endl;
-			}
-			sprintf_s(nameBuf,50,"../data/images/image1_%03d.jpg",count);
-			if (!cvSaveImage(nameBuf,pImg[1])){
-				cout<<"can not save image :"<<nameBuf<<endl;
-			}else{
-				cout<<"saved :"<<nameBuf<<endl;
-			}
+		}
+		else if (key == 13){
+			string camera_name1 = "../data/images/image0_" + to_string(count) + ".jpg";
+			saveFile(camera_name1, Imgs[0]);
+#ifndef USEONE
+			string camera_name2 = "../data/images/image1_" + to_string(count) + ".jpg";			
+			saveFile(camera_name2, Imgs[1]);
+#endif
 			count++;
 		}
 	}
-	
-	cvReleaseCapture(&pCap[0]);
-	cvReleaseCapture(&pCap[1]);
-
 	return 0;
 }
+
+
